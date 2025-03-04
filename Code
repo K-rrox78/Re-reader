@@ -1,0 +1,54 @@
+import pandas as pd
+from collections import Counter
+
+# Charger le fichier Excel
+fichier_excel = "Nom du fichier.xlsx"  # Remplace par le nom de ton fichier
+xls = pd.ExcelFile(fichier_excel)
+
+# Dictionnaire pour stocker toutes les occurrences des valeurs de "Colonne" et "Colonne"
+total_counts = Counter()
+
+# Stocker les DataFrames pour comparaison
+sheets_data = {}
+
+# Lire chaque feuille et analyser les colonnes
+for sheet_name in xls.sheet_names:
+    if sheet_name == " ": # remplacer par le nom de la feuille
+        continue  # Ignorer la feuille 
+    
+    df = pd.read_excel(xls, sheet_name=sheet_name)
+    
+    # Vérifier si les colonnes nécessaires existent
+    required_columns = {'X', 'X', 'X', 'X', 'X', 'A', 'COMMENTAIRE'}
+    if not required_columns.issubset(df.columns):
+        print(f"⚠️ Les colonnes nécessaires ne sont pas présentes dans la feuille {sheet_name}.")
+        continue
+    
+    # Stocker le DataFrame pour comparaison
+    sheets_data[sheet_name] = df
+    
+    # Mettre à jour les occurrences des valeurs de A et COMMENTAIRE
+    total_counts.update(df[['A', 'COMMENTAIRE']].apply(tuple, axis=1))
+
+# Identifier les valeurs les plus rares
+rare_threshold = 2  # Ajuste ce seuil si nécessaire
+rare_values = {k for k, v in total_counts.items() if v <= rare_threshold}
+
+# Créer un DataFrame pour stocker les lignes avec valeurs rares
+erreurs_list = []
+
+for sheet_name, df in sheets_data.items():
+    # Filtrer les lignes où (A, COMMENTAIRE) sont rares
+    rare_rows = df[df[['A', 'COMMENTAIRE']].apply(tuple, axis=1).isin(rare_values)]
+    if not rare_rows.empty:
+        rare_rows.insert(0, 'Feuille', sheet_name)
+        erreurs_list.append(rare_rows)
+
+# Sauvegarder les erreurs dans une nouvelle feuille du même fichier Excel
+if erreurs_list:
+    erreurs_df = pd.concat(erreurs_list, ignore_index=True)
+    with pd.ExcelWriter(fichier_excel, mode="a", engine="openpyxl") as writer:
+        erreurs_df.to_excel(writer, sheet_name="Valeurs_rares", index=False)
+    print(f"📁 Les erreurs ont été ajoutées à {fichier_excel} sous la feuille 'Valeurs_rares'.")
+else:
+    print("✅ Aucune valeur rare détectée.")
