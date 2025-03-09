@@ -6,7 +6,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.table import Table, TableStyleInfo
 
 # Configuration du fichier Excel
-fichier_excel = "Rapport_Pré-COVASEC_TESTS - Copie (2).xlsx"
+fichier_excel = "Nom du tableau.xlsx"
 xls = pd.ExcelFile(fichier_excel)
 
 # Liste pour stocker les données de toutes les feuilles
