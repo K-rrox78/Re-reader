@@ -1,54 +1,169 @@
 import pandas as pd
 from collections import Counter
+from openpyxl import load_workbook
+from openpyxl.styles import Font
+from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.table import Table, TableStyleInfo
 
-# Charger le fichier Excel
-fichier_excel = "Nom du fichier.xlsx"  # Remplace par le nom de ton fichier
+# Configuration du fichier Excel
+fichier_excel = "Rapport_Pré-COVASEC_TESTS - Copie (2).xlsx"
 xls = pd.ExcelFile(fichier_excel)
 
-# Dictionnaire pour stocker toutes les occurrences des valeurs de "Colonne" et "Colonne"
-total_counts = Counter()
+# Liste pour stocker les données de toutes les feuilles
+sheets_data = []
 
-# Stocker les DataFrames pour comparaison
-sheets_data = {}
-
-# Lire chaque feuille et analyser les colonnes
+# Parcourir chaque feuille du fichier Excel
 for sheet_name in xls.sheet_names:
-    if sheet_name == " ": # remplacer par le nom de la feuille
-        continue  # Ignorer la feuille 
+    # Ne traiter que les feuilles commençant par 'Ports_'
+    if not sheet_name.startswith('Ports_'):
+        continue
+        
+    # Charger la feuille sans en-tête prédéfini
+    df = pd.read_excel(xls, sheet_name=sheet_name, header=None)
     
-    df = pd.read_excel(xls, sheet_name=sheet_name)
-    
-    # Vérifier si les colonnes nécessaires existent
-    required_columns = {'X', 'X', 'X', 'X', 'X', 'A', 'COMMENTAIRE'}
-    if not required_columns.issubset(df.columns):
-        print(f"⚠️ Les colonnes nécessaires ne sont pas présentes dans la feuille {sheet_name}.")
+    # Trouver la ligne contenant "IP" qui servira de référence
+    ip_row = None
+    for idx, row in df.iterrows():
+        if 'IP' in row.values:
+            ip_row = idx
+            break
+            
+    if ip_row is None:
+        print(f"La ligne IP n'a pas été trouvée dans la feuille {sheet_name}")
         continue
     
-    # Stocker le DataFrame pour comparaison
-    sheets_data[sheet_name] = df
+    # Variables pour stocker les informations courantes
+    data_rows = []
+    current_ip = None
+    current_tcp = None
+    current_port = None
+    current_state = None
+    current_service = None
+    current_version = None
+    current_matrix = None
+    current_avis = None
+    current_comment = None
     
-    # Mettre à jour les occurrences des valeurs de A et COMMENTAIRE
-    total_counts.update(df[['A', 'COMMENTAIRE']].apply(tuple, axis=1))
+    # Parcourir les lignes après l'en-tête IP
+    for idx, row in df.iterrows():
+        if idx <= ip_row:
+            continue
+            
+        # Nettoyer les valeurs (supprimer les espaces et gérer les NaN)
+        row_values = [str(val).strip() if pd.notna(val) else "" for val in row.values]
+        
+        # Mise à jour de l'IP si une nouvelle est trouvée
+        if row_values[0] and '.' in row_values[0]:
+            current_ip = row_values[0]
+            
+        # Extraire les autres informations si disponibles
+        if len(row_values) > 1:
+            if row_values[1]:  # TCP/UDP
+                current_tcp = row_values[1]
+            if len(row_values) > 2 and row_values[2]:  # PORT
+                current_port = row_values[2]
+            if len(row_values) > 3 and row_values[3]:  # ETAT
+                current_state = row_values[3]
+            if len(row_values) > 4 and row_values[4]:  # SERVICE
+                current_service = row_values[4]
+            if len(row_values) > 5 and row_values[5]:  # VERSION
+                current_version = row_values[5]
+            if len(row_values) > 6 and row_values[6]:  # Matrice
+                current_matrix = row_values[6]
+            if len(row_values) > 7 and row_values[7]:  # AVIS
+                current_avis = row_values[7]
+            if len(row_values) > 8 and row_values[8]:  # Commentaire
+                current_comment = row_values[8]
+        
+        # Créer une nouvelle ligne si nous avons au moins une IP et un port
+        if current_ip and current_port:
+            data_rows.append({
+                'IP': current_ip,
+                'TCP/UDP': current_tcp or '',
+                'PORT': current_port,
+                'ETAT': current_state or '',
+                'SERVICE': current_service or '',
+                'VERSION': current_version or '',
+                'Matrice': current_matrix or '',
+                'AVIS': current_avis or '',
+                'Commentaire': current_comment or ''
+            })
+    
+    # Si des données ont été trouvées, créer un DataFrame
+    if data_rows:
+        sheet_df = pd.DataFrame(data_rows)
+        sheet_df.insert(0, 'Feuille', sheet_name)  # Ajouter le nom de la feuille
+        sheets_data.append(sheet_df)
+    else:
+        print(f"Aucune donnée valide trouvée dans la feuille {sheet_name}")
 
-# Identifier les valeurs les plus rares
-rare_threshold = 2  # Ajuste ce seuil si nécessaire
-rare_values = {k for k, v in total_counts.items() if v <= rare_threshold}
-
-# Créer un DataFrame pour stocker les lignes avec valeurs rares
-erreurs_list = []
-
-for sheet_name, df in sheets_data.items():
-    # Filtrer les lignes où (A, COMMENTAIRE) sont rares
-    rare_rows = df[df[['A', 'COMMENTAIRE']].apply(tuple, axis=1).isin(rare_values)]
-    if not rare_rows.empty:
-        rare_rows.insert(0, 'Feuille', sheet_name)
-        erreurs_list.append(rare_rows)
-
-# Sauvegarder les erreurs dans une nouvelle feuille du même fichier Excel
-if erreurs_list:
-    erreurs_df = pd.concat(erreurs_list, ignore_index=True)
+# Traitement final des données
+if sheets_data:
+    # Fusionner toutes les feuilles en une seule
+    port_comp_df = pd.concat(sheets_data, ignore_index=True)
+    
+    # Créer la feuille Port_Comp
     with pd.ExcelWriter(fichier_excel, mode="a", engine="openpyxl") as writer:
-        erreurs_df.to_excel(writer, sheet_name="Valeurs_rares", index=False)
-    print(f"📁 Les erreurs ont été ajoutées à {fichier_excel} sous la feuille 'Valeurs_rares'.")
+        port_comp_df.to_excel(writer, sheet_name="Port_Comp", index=False)
+    print("La feuille 'Port_Comp' a été créée avec les données consolidées.")
+
+    # Analyse des valeurs rares
+    total_counts = Counter(port_comp_df[['AVIS', 'Commentaire']].apply(tuple, axis=1))
+    rare_threshold = 2  # Seuil pour considérer une combinaison comme rare
+    rare_values = {k for k, v in total_counts.items() if v <= rare_threshold}
+
+    # Création de la liste des erreurs
+    erreurs_list = []
+    for idx, row in port_comp_df.iterrows():
+        if (row['AVIS'], row['Commentaire']) in rare_values:
+            row_dict = row.to_dict()
+            row_dict['Ligne_Référence'] = idx + 2  # +2 car Excel commence à 1 et on a l'en-tête
+            row_dict['IP_Concernée'] = row['IP']
+            row_dict['Lien'] = f"=HYPERLINK(\"#Port_Comp!A{idx + 2}\", \"Voir Ligne\")"
+            erreurs_list.append(row_dict)
+
+    # Création de la feuille Valeurs_rares si des erreurs sont trouvées
+    if erreurs_list:
+        erreurs_df = pd.DataFrame(erreurs_list)
+        
+        # Organisation des colonnes
+        cols_order = ['Feuille', 'IP_Concernée', 'TCP/UDP', 'PORT', 'ETAT', 'SERVICE', 
+                     'VERSION', 'Matrice', 'AVIS', 'Commentaire', 'Ligne_Référence', 'Lien']
+        erreurs_df = erreurs_df[cols_order]
+        
+        # Sauvegarder la feuille des erreurs
+        with pd.ExcelWriter(fichier_excel, mode="a", engine="openpyxl") as writer:
+            erreurs_df.to_excel(writer, sheet_name="Valeurs_rares", index=False)
+        
+        # Application des styles avec openpyxl
+        wb = load_workbook(fichier_excel)
+        ws_port_comp = wb["Port_Comp"]
+        ws_erreurs = wb["Valeurs_rares"]
+        
+        # Style des liens hypertexte
+        for row in ws_erreurs.iter_rows(min_row=2, max_row=ws_erreurs.max_row):
+            for cell in row:
+                if isinstance(cell.value, str) and cell.value.startswith("=HYPERLINK"):
+                    cell.font = Font(color="0000FF", underline="single")
+        
+        # Création du tableau Port_Comp
+        table_port_comp = Table(displayName="Table_PortComp", 
+                              ref=f"A1:{get_column_letter(ws_port_comp.max_column)}{ws_port_comp.max_row}")
+        style = TableStyleInfo(name="TableStyleMedium9", showFirstColumn=False,
+                             showLastColumn=False, showRowStripes=True, showColumnStripes=True)
+        table_port_comp.tableStyleInfo = style
+        ws_port_comp.add_table(table_port_comp)
+        
+        # Création du tableau Valeurs_rares
+        table_erreurs = Table(displayName="Table_ValeursRares",
+                            ref=f"A1:{get_column_letter(ws_erreurs.max_column)}{ws_erreurs.max_row}")
+        table_erreurs.tableStyleInfo = style
+        ws_erreurs.add_table(table_erreurs)
+        
+        # Sauvegarder les modifications
+        wb.save(fichier_excel)
+        print("Les erreurs ont été ajoutées dans la feuille 'Valeurs_rares' avec mise en forme et tableaux structurés.")
+    else:
+        print("Aucune valeur rare détectée.")
 else:
-    print("✅ Aucune valeur rare détectée.")
+    print("Aucune donnée valide trouvée dans les feuilles Ports_.")
